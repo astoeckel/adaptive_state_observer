@@ -118,7 +118,7 @@ void aso_pred_dx(Observer *observer, const double *x, const double *u,
 void aso_pred_z(Observer *observer, const double *x, double *z, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++) {
-		aso_pred_z_single(observer, x + $N_STATE_DIM * i, z + $N_STATE_DIM * i);
+		aso_pred_z_single(observer, x + $N_STATE_DIM * i, z + $N_OBSERVATION_DIM * i);
 	}
 }
 
