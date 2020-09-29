@@ -45,12 +45,14 @@ DEFAULT_FLAGS = [
     '-Wno-deprecated-copy',
     '-fdiagnostics-color=always',
     '-faligned-new',
+    '-fno-partial-inlining', # Does not improve performance and causes a large penalty when -g is active at the same time for some reason
     '-fno-exceptions',  # This code does not use exceptions
     '-fno-rtti',  # We don't need no runtime-type information
     '-ffast-math',  # Be sloppy, we don't have non-finite math
     '-x',  # Specify the language since we're compiling from stdin
     'c++',
     '-fPIC',
+
 ]
 
 def _pkg_name():
@@ -194,7 +196,7 @@ def _compile_cpp_obj(tar_dir,
                 'g++',
                 '-c',  # Only compiling an object file
                 '-g' if debug else '-DNDEBUG',  # Toggle debug code
-                '-O1' if debug else '-O3',  # Toggle optimisation
+                '-Og' if debug else '-O3',  # Toggle optimisation
             ] + flags))
 
     # Fetch the module directory which is used as include directory
