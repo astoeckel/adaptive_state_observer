@@ -18,15 +18,13 @@
 
 #pragma once
 
-#include <iostream>
-
-#include <cstdint>
+#include <Eigen/Dense>
 #include <cstddef>
+#include <cstdint>
 #include <random>
 #include <tuple>
 
-#include <Eigen/Dense>
-
+#include "matrix.hpp"
 #include "nef.hpp"
 
 template <size_t N_STATE_DIM, size_t N_AUX_STATE_DIM, size_t N_OBSERVATION_DIM,
@@ -55,12 +53,6 @@ public:
 	static constexpr size_t M = N_OBSERVATION_DIM;
 	static constexpr size_t U = N_CONTROL_DIM;
 
-	template <size_t M, size_t N>
-	using Mat = Eigen::Matrix<double, M, N, Eigen::RowMajor>;
-
-	template <size_t M>
-	using Vec = Eigen::Matrix<double, M, 1>;
-
 	/* Vector types */
 	using State = Vec<N>;
 	using ReducedState = Vec<Nr>;
@@ -73,16 +65,12 @@ public:
 	using ObservationMatrix = Mat<M, Nr>;
 
 	/* Neuron ensemble types */
-	using EnsembleG = Ensemble<NEURON_TYPE, N_NEURONS_G, N + U>;
-	using EnsembleH = Ensemble<NEURON_TYPE, N_NEURONS_H, Nr>;
+	using EnsembleG = NEFEnsemble<NEURON_TYPE, N_NEURONS_G, N + U, Nr>;
+	using EnsembleH = NEFEnsemble<NEURON_TYPE, N_NEURONS_H, Nr, M>;
 
 	/* Neuron ensemble specific vector types */
-	using ActivitiesG = typename EnsembleG::Activities;
-	using ActivitiesH = typename EnsembleH::Activities;
-
-	/* Learning rule implementations */
-	using LearnG = PES<N_NEURONS_G, Nr>;
-	using LearnH = PES<N_NEURONS_H, M>;
+	using NeuronVecG = typename EnsembleG::NeuronVec;
+	using NeuronVecH = typename EnsembleH::NeuronVec;
 
 private:
 	StateTransitionMatrix m_G0;
@@ -90,9 +78,6 @@ private:
 
 	EnsembleG m_ens_g;
 	EnsembleH m_ens_h;
-
-	LearnG m_learn_g;
-	LearnH m_learn_h;
 
 	/**
 	 * Helper function used internally to generate a vector combining the given
@@ -120,66 +105,12 @@ public:
 	    : m_G0(StateTransitionMatrix::Zero()),
 	      m_H0(ObservationMatrix::Zero()),
 	      m_ens_g(rng),
-	      m_ens_h(rng),
-	      m_learn_g(1.0),
-	      m_learn_h(1.0)
+	      m_ens_h(rng)
 	{
 	}
 
-	/**
-	 * Evaluates the learned dynamics g(x, u) for the given (full) state vector
-	 * x and the control input u.
-	 */
-	ReducedState g(const State &x, const Control &u) const
+	State pred_dx(const State &x, const Control &u) const
 	{
-		// Compute the activities of ens_g and decode according to the learned
-		// function weights; add the dynamics described by G0
-		const StateAndControl xu = concatenate_state_and_control(x, u);
-		return m_learn_g.weights() * m_ens_g(xu);
-	}
-
-	/**
-	 * Computes the learned observation prediction h(xr) for the given (reduced)
-	 * state vector xr.
-	 */
-	Observation h(const ReducedState &xr) const
-	{
-		return m_learn_h.weights() * m_ens_h(xr);
-	}
-
-	/**
-	 * Computes the Jacobian of the learned observation function at the given
-	 * point xr.
-	 */
-	ObservationMatrix H(const ReducedState &xr) const
-	{
-		ObservationMatrix H;
-
-		// The Jacobian is given as
-		//  ∂
-		// ---- W @ a(E @ x) = W @ diag(da(E @ x)) @ E = W @ (da(E @ x) * E)
-		//  ∂x
-
-		// Evaluate the derivative of the activities given the context
-		const ActivitiesH da = m_ens_h.derivative(xr);
-
-		// Compute each column of the target matrix individually. This way we
-		// don't have to allocate a large intermediate matrix on the heap
-		for (size_t i = 0; i < Nr; i++) {
-			// Multiply the derivative of the activities by the corresponding
-			// column of the encoder.
-			const ActivitiesH t = da.array() * m_ens_h.encoder().col(i).array();
-
-			// Compute the matrix-vector product between the temporary scaled
-			// column of the encoding matrix and multiply it by the decoding
-			// weights
-			H.col(i).noalias() = m_learn_h.weights() * t;
-		}
-
-		return H;
-	}
-
-	State pred_dx(const State &x, const Control &u) const {
 		// Concatenate the current state and the control signal
 		const StateAndControl xu = concatenate_state_and_control(x, u);
 
@@ -191,37 +122,46 @@ public:
 		dx = m_G0 * xu;
 
 		// Evaluate the neural network
-		dxr += m_learn_g.weights() * m_ens_g(xu);
+		const NeuronVecG J_g = m_ens_g.activations(xu);
+		const NeuronVecG a_g = m_ens_g.activities(J_g);
+		dxr += m_ens_g.forward(a_g);
 
 		return dx;
 	}
 
-	Observation pred_z(const State &x) const {
+	Observation pred_z(const State &x) const
+	{
 		// We're only looking at the first few dimensions of the state vector
 		Eigen::Map<const ReducedState> xr(x.data());
 
 		// Compute the predicted observation
-		return m_H0 * xr + m_learn_h.weights() * m_ens_h(xr);
+		const NeuronVecH J_h = m_ens_h.activations(xr);
+		const NeuronVecH a_h = m_ens_h.activities(J_h);
+		return m_H0 * xr + m_ens_h.forward(a_h);
 	}
 
 	/**
 	 * Takes the last state x, the control input u, and the observation z to
 	 * compute a new state x'. Updates the learned functions.
 	 */
-	std::tuple<State, Observation>
-	step(const State &x, const Control &u, const Observation &z, const Params &p)
+	std::tuple<State, Observation> step(const State &x, const Control &u,
+	                                    const Observation &z, const Params &p)
 	{
 		// Build several variants of the state vector
 		const StateAndControl xu = concatenate_state_and_control(x, u);
 		Eigen::Map<const ReducedState> xr(x.data());
 
+		// Compute the neuron ensemble activations (input currents)
+		const NeuronVecG J_g = m_ens_g.activations(xu);
+		const NeuronVecH J_h = m_ens_h.activations(xr);
+
 		// Compute the neuron ensemble activities
-		const ActivitiesG a_g = m_ens_g(xu);
-		const ActivitiesH a_h = m_ens_h(xr);
+		const NeuronVecG a_g = m_ens_g.activities(J_g);
+		const NeuronVecH a_h = m_ens_h.activities(J_h);
 
 		// Compute the observation error, and derive the state update error
-		Observation pred_z = m_H0 * xr + m_learn_h.weights() * a_h;
-		const ObservationMatrix H_ = m_H0 + H(xr);
+		Observation pred_z = m_H0 * xr + m_ens_h.forward(a_h);
+		const ObservationMatrix H_ = m_H0 + m_ens_h.jacobian(J_h, a_h);
 		const Observation err_z = z - pred_z;
 		const ReducedState err_dxr = p.gain * (H_.transpose() * err_z);
 
@@ -229,11 +169,11 @@ public:
 		// "reduced" dimensions of the state
 		State pred_dx = m_G0 * xu;
 		Eigen::Map<ReducedState> pred_dxr(pred_dx.data());
-		pred_dxr += m_learn_g.weights() * a_g;
+		pred_dxr += m_ens_g.forward(a_g);
 
 		// Update the learned functions according to the computed errors
-		m_learn_g.step(a_g, err_dxr, p.dt * p.eta * p.eta_rel_g);
-		m_learn_h.step(a_h, err_z, p.dt * p.eta * p.eta_rel_h);
+		m_ens_g.backward(p.dt * p.eta * p.eta_rel_g, err_dxr, a_g);
+		m_ens_h.backward(p.dt * p.eta * p.eta_rel_h, err_z, a_h);
 
 		// Compute the complete state update by summing the predicted state
 		// update and the state update error.
@@ -242,19 +182,14 @@ public:
 		dxr += err_dxr;
 
 		// Compute the actual new state
-		return std::make_tuple<State, Observation>(x + p.dt * dx, std::move(pred_z));
+		return std::make_tuple<State, Observation>(x + p.dt * dx,
+		                                           std::move(pred_z));
 	}
 
 	double *G0() { return m_G0.data(); }
 	double *H0() { return m_H0.data(); }
 
-	double *g_W() { return m_learn_g.weights().data(); }
-	double *h_W() { return m_learn_h.weights().data(); }
-	double *g_E() { return m_ens_g.encoder().data(); }
-	double *h_E() { return m_ens_h.encoder().data(); }
-	double *g_gain() { return m_ens_g.gain().data(); }
-	double *h_gain() { return m_ens_h.gain().data(); }
-	double *g_bias() { return m_ens_g.bias().data(); }
-	double *h_bias() { return m_ens_h.bias().data(); }
+	double *ens_g_params() { return m_ens_g.params().data(); }
+	double *ens_h_params() { return m_ens_h.params().data(); }
 };
 

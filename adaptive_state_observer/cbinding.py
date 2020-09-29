@@ -154,14 +154,14 @@ def _get_array_names_and_shapes(s):
     return {
         "G0": (s.N, s.N + s.U),
         "H0": (s.M, s.Nr),
-        "g_W": (s.Nr, s.n_neurons_g),
-        "h_W": (s.Nr, s.n_neurons_h),
-        "g_E": (s.n_neurons_g, s.N),
-        "h_E": (s.n_neurons_h, s.Nr),
-        "g_gain": (s.n_neurons_g, ),
-        "h_gain": (s.n_neurons_h, ),
-        "g_bias": (s.n_neurons_g, ),
-        "h_bias": (s.n_neurons_h, ),
+#        "g_W": (s.Nr, s.n_neurons_g),
+#        "h_W": (s.Nr, s.n_neurons_h),
+#        "g_E": (s.n_neurons_g, s.N),
+#        "h_E": (s.n_neurons_h, s.Nr),
+#        "g_gain": (s.n_neurons_g, ),
+#        "h_gain": (s.n_neurons_h, ),
+#        "g_bias": (s.n_neurons_g, ),
+#        "h_bias": (s.n_neurons_h, ),
     }
 
 
@@ -450,7 +450,7 @@ if __name__ == "__main__":
     observer.H0[...] = np.zeros((1, 1))
     observer.G0[...] = np.array(((-1.0, 6.0), (-6.0, -1.0)))
 
-    T = 1000.0
+    T = 10000.0
     ts = np.arange(0, T, observer.dt)
     zs = np.sin(2.0 * np.pi * ts)
 

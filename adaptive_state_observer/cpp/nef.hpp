@@ -24,52 +24,8 @@
 #include <Eigen/Dense>
 
 #include "dists.hpp"
-
-/**
- * The PES class implements the prescribed error sensitivity learning rule.
- *
- * @tparam N_NEURONS is the number of pre-neurons.
- * @tparam N_DIM is the number of dimensions that should be decoded from the
- *         pre-neurons.
- */
-template <size_t N_NEURONS, size_t N_DIM>
-class PES {
-public:
-	static constexpr size_t n_neurons = N_NEURONS;
-	static constexpr size_t n_dim = N_DIM;
-
-	using Weights =
-	    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-	using Decoded = Eigen::Matrix<double, N_DIM, 1>;
-	using Error = Eigen::Matrix<double, N_DIM, 1>;
-	using Activities = Eigen::Matrix<double, N_NEURONS, 1>;
-
-private:
-	Weights m_weights;
-	double m_learning_rate;
-
-public:
-	PES(double learning_rate = 1e-2)
-	    : m_weights(Weights::Zero(n_dim, N_NEURONS)),
-	      m_learning_rate(learning_rate)
-	{
-	}
-
-	void step(const Activities &a, const Error &e, double dt = 1e-3)
-	{
-		m_weights += dt * m_learning_rate * e * a.transpose();
-	}
-
-	double learning_rate() const { return m_learning_rate; }
-
-	Decoded evaluate(const Activities &a) const { return m_weights * a; }
-
-	Decoded operator()(const Activities &a) const { return evaluate(a); }
-
-	const Weights &weights() const { return m_weights; }
-
-	Weights &weights() { return m_weights; }
-};
+#include "matrix.hpp"
+#include "nef.hpp"
 
 /**
  * Structure defining the ReLU nonlinearity.
@@ -77,9 +33,9 @@ public:
 struct ReLU {
 	static double inverse(double a) { return a; }
 
-	static double activation(double x) { return std::max(x, 0.0); }
+	static double activity(double x) { return std::max(x, 0.0); }
 
-	static double derivative(double x) { return (x > 0.0) ? 1.0 : 0.0; }
+	static double derivative(double x, double) { return (x > 0.0) ? 1.0 : 0.0; }
 };
 
 /**
@@ -97,7 +53,7 @@ struct LIF {
 		return 0.0;
 	}
 
-	static double activation(double x)
+	static double activity(double x)
 	{
 		if (x >= 1.0 + 1e-6) {
 			return 1.0 / (slope - std::log1p(-1.0 / x));
@@ -105,10 +61,9 @@ struct LIF {
 		return 0.0;
 	}
 
-	static double derivative(double x)
+	static double derivative(double x, double a)
 	{
 		if (x >= 1.0 + 1e-6) {
-			const double a = activation(x);
 			return (a * a) / (x * x * (1.0 - 1.0 / x));
 		}
 		return 0.0;
@@ -116,28 +71,56 @@ struct LIF {
 };
 
 /**
- * Class implementing a single neural ensemble.
+ * Two-layer neural network with a fixed input layer and a learned output layer.
  */
-template <typename NEURON_TYPE, size_t N_NEURONS, size_t N_DIMS>
-class Ensemble {
+template <typename NEURON_TYPE, size_t N_NEURONS, size_t N_DIM_IN,
+          size_t N_DIM_OUT>
+class NEFEnsemble {
 public:
 	static constexpr size_t n_neurons = N_NEURONS;
-	static constexpr size_t n_dims = N_DIMS;
+	static constexpr size_t n_dim_in = N_DIM_IN;
+	static constexpr size_t n_dim_out = N_DIM_OUT;
+	static constexpr size_t n_params = N_DIM_IN + 2;
 
-	using NeuronVec = Eigen::Array<double, N_NEURONS, 1>;
-	using Input = Eigen::Matrix<double, N_DIMS, 1>;
-	using Activities = Eigen::Matrix<double, N_NEURONS, 1>;
-	using Gain = NeuronVec;
-	using Bias = NeuronVec;
+	using Parameters = Mat<Eigen::Dynamic, Eigen::Dynamic>;
+	using NeuronVec = Arr<N_NEURONS>;
+	using Input = Vec<N_DIM_IN>;
+	using Output = Vec<N_DIM_OUT>;
+	using Weights = Mat<Eigen::Dynamic, Eigen::Dynamic>;
+	using Jacobian = Mat<N_DIM_OUT, N_DIM_IN>;
+
+	using Gain = Eigen::Map<Arr<N_NEURONS>, 0, Eigen::Stride<n_params, 1>>;
+	using Bias = Eigen::Map<Arr<N_NEURONS>, 0, Eigen::Stride<n_params, 1>>;
 	using Encoder =
-	    Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+	    Eigen::Map<Mat<N_NEURONS, N_DIM_IN>, 0, Eigen::Stride<n_params, 1>>;
 
 private:
+	/**
+	 * Matrix containing parameters including the encoders, gains, and biases.
+	 */
+	Parameters m_params;
+
+	/**
+	 * Matrix containing the decoder weights.
+	 */
+	Weights m_weights;
+
+	/**
+	 * Gain array. This is pointing
+	 */
 	Gain m_gain;
+
 	Bias m_bias;
+
 	Encoder m_encoder;
 
-	void compute_gain_bias(std::mt19937 &rng)
+public:
+	NEFEnsemble(std::mt19937 &rng)
+	    : m_params(Parameters::Zero(N_NEURONS, n_params)),
+	      m_weights(Weights::Zero(n_dim_out, N_NEURONS)),
+	      m_gain(m_params.data() + 0),
+	      m_bias(m_params.data() + 1),
+	      m_encoder(m_params.data() + 2)
 	{
 		// Compute the intercepts and maximum rates
 		const NeuronVec intercepts =
@@ -155,47 +138,73 @@ private:
 		// Use the currents to compute the gain and bias
 		m_gain = (j_0 - j_max_rates) / (intercepts - 1.0);
 		m_bias = j_max_rates - m_gain;
+		m_encoder = Dists::hypersphere(n_neurons, n_dim_in, rng);
 	}
 
-public:
-	Ensemble(std::mt19937 &rng)
+	/**
+	 * Computes the input current flowing into each non-linearity.
+	 */
+	NeuronVec activations(const Input &x) const
 	{
-		compute_gain_bias(rng);
-		m_encoder = Dists::hypersphere(n_neurons, n_dims, rng);
+		return m_gain * (m_encoder * x).array() + m_bias;
 	}
 
-	Activities activities(const Input &input) const
+	/**
+	 * Computes the activity of each neuron after the non-linearity.
+	 */
+	NeuronVec activities(const NeuronVec &J) const
 	{
-		Activities res;
+		NeuronVec res;
 		for (size_t i = 0; i < n_neurons; i++) {
-			res[i] = NEURON_TYPE::activation(
-			    m_gain[i] * m_encoder.row(i) * input + m_bias[i]);
+			res[i] = NEURON_TYPE::activity(J[i]);
 		}
 		return res;
 	}
 
-	Activities derivative(const Input &input) const
+	NeuronVec derivative(const NeuronVec &J, const NeuronVec &a) const
 	{
-		Activities res;
+		NeuronVec res;
 		for (size_t i = 0; i < n_neurons; i++) {
-			res[i] = m_gain[i] *
-			         NEURON_TYPE::derivative(
-			             m_gain[i] * m_encoder.row(i) * input + m_bias[i]);
+			res[i] = m_gain[i] * NEURON_TYPE::derivative(J[i], a[i]);
 		}
 		return res;
 	}
 
-	Activities operator()(const Input &input) const
+	Output forward(const NeuronVec &a) const { return m_weights * a.matrix(); }
+
+	void backward(double eta, const Output &err, const NeuronVec &a)
 	{
-		return activities(input);
+		m_weights += (eta * err) * a.matrix().transpose();
 	}
 
-	const Encoder &encoder() const { return m_encoder; }
-	Encoder &encoder() { return m_encoder; }
+	Jacobian jacobian(const NeuronVec &J, const NeuronVec &a) const
+	{
+		Jacobian res;
 
-	const Gain &gain() const { return m_gain; }
-	Gain &gain() { return m_gain; }
+		// The Jacobian is given as
+		//  ∂
+		// ---- W @ a(E @ x) = W @ diag(da(E @ x)) @ E = W @ (da(E @ x) * E)
+		//  ∂x
 
-	const Bias &bias() const { return m_bias; }
-	Bias &bias() { return m_bias; }
+		// Evaluate the derivative of the activities given the context
+		const NeuronVec da = derivative(J, a);
+
+		// Compute each column of the target matrix individually. This way we
+		// don't have to allocate a large intermediate matrix on the heap
+		for (size_t i = 0; i < n_dim_in; i++) {
+			// Multiply the derivative of the activities by the corresponding
+			// column of the encoder.
+			const NeuronVec tmp = da * m_encoder.col(i).array();
+
+			// Compute the matrix-vector product between the temporary scaled
+			// column of the encoding matrix and multiply it by the decoding
+			// weights
+			res.col(i).noalias() = m_weights * tmp.matrix();
+		}
+
+		return res;
+	}
+
+	Parameters &params() { return m_params; }
+	const Parameters &params() const { return m_params; }
 };

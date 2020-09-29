@@ -126,19 +126,7 @@ double *aso_get_G0(Observer *o) { return o->G0(); }
 
 double *aso_get_H0(Observer *o) { return o->H0(); }
 
-double *aso_get_g_W(Observer *o) { return o->g_W(); }
+double *aso_get_ens_g_params(Observer *o) { return o->ens_g_params(); }
 
-double *aso_get_h_W(Observer *o) { return o->h_W(); }
-
-double *aso_get_g_E(Observer *o) { return o->g_E(); }
-
-double *aso_get_h_E(Observer *o) { return o->h_E(); }
-
-double *aso_get_g_gain(Observer *o) { return o->g_gain(); }
-
-double *aso_get_h_gain(Observer *o) { return o->h_gain(); }
-
-double *aso_get_g_bias(Observer *o) { return o->g_bias(); }
-
-double *aso_get_h_bias(Observer *o) { return o->h_bias(); }
+double *aso_get_ens_h_params(Observer *o) { return o->ens_h_params(); }
 }
