@@ -58,6 +58,7 @@ def _get_code_from_template(template_file, replacements):
 def _get_deps():
     return [
         'cpp/dists.cpp',
+        'cpp/matrix.cpp',
         'cpp/nef.cpp',
         'cpp/observer.cpp',
     ]
