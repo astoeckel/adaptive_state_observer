@@ -22,8 +22,7 @@
 
 static constexpr int layout(int M, int N)
 {
-	return ((M == 1) || (N == 1)) ? Eigen::AutoAlign
-	                              : (Eigen::AutoAlign | Eigen::RowMajor);
+	return Eigen::AutoAlign | (((M != 1) && (N == 1)) ? 0 : Eigen::RowMajor);
 }
 
 template <int M, int N>
@@ -32,6 +31,10 @@ using Mat = Eigen::Matrix<double, M, N, layout(M, N)>;
 template <int M>
 using Vec = Eigen::Matrix<double, M, 1>;
 
-template <int M, int N=1>
+template <int M, int N = 1>
 using Arr = Eigen::Array<double, M, N, layout(M, N)>;
+
+template <typename T, int N>
+using Stride = Eigen::Stride<(T::Options & Eigen::RowMajor) ? N : 1,
+                             (T::Options & Eigen::RowMajor) ? 1 : N>;
 

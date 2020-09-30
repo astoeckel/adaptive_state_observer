@@ -68,18 +68,24 @@ def _get_deps():
 # Compile-time setup                                                          #
 ###############################################################################
 
+_neuron_type_map = {
+    "lif": "LIFEnsemble",
+    "relu": "ReLUEnsemble",
+    "rbf": "RBFEnsemble",
+}
 
-def _translate_neuron_type(neuron_type):
-    neuron_type_map = {
-        "lif": "LIF",
-        "relu": "ReLU",
-    }
+
+def _canonical_neuron_type(neuron_type):
     neuron_type = neuron_type.lower()
-    if not neuron_type in neuron_type_map:
+    if not neuron_type in _neuron_type_map:
         raise RuntimeError(
             "Unknown neuron type \"{}\", valid neuron types are {}".format(
-                neuron_type, set(neuron_type_map.keys())))
-    return neuron_type_map[neuron_type]
+                neuron_type, set(_neuron_type_map.keys())))
+    return neuron_type
+
+
+def _translate_neuron_type(neuron_type):
+    return _neuron_type_map[_canonical_neuron_type(neuron_type)]
 
 
 @dataclasses.dataclass
@@ -99,6 +105,26 @@ class Setup:
     @property
     def n_reduced_state_dim(self):
         return self.n_state_dim - self.n_aux_state_dim
+
+    @property
+    def n_params_g(self):
+        neuron_type = _canonical_neuron_type(self.neuron_type)
+        if neuron_type in {"relu", "lif",}:
+            return self.N + 2
+        elif neuron_type in {"rbf",}:
+            return self.N + 1
+        else:
+            assert False
+
+    @property
+    def n_params_h(self):
+        neuron_type = _canonical_neuron_type(self.neuron_type)
+        if neuron_type in {"relu", "lif",}:
+            return self.Nr + 2
+        elif neuron_type in {"rbf",}:
+            return self.Nr + 1
+        else:
+            assert False
 
     @property
     def N(self):
@@ -151,18 +177,77 @@ c_params_p = POINTER(Params)
 
 
 def _get_array_names_and_shapes(s):
-    return {
-        "G0": (s.N, s.N + s.U),
-        "H0": (s.M, s.Nr),
-#        "g_W": (s.Nr, s.n_neurons_g),
-#        "h_W": (s.Nr, s.n_neurons_h),
-#        "g_E": (s.n_neurons_g, s.N),
-#        "h_E": (s.n_neurons_h, s.Nr),
-#        "g_gain": (s.n_neurons_g, ),
-#        "h_gain": (s.n_neurons_h, ),
-#        "g_bias": (s.n_neurons_g, ),
-#        "h_bias": (s.n_neurons_h, ),
+    base_arrs = {
+        "G0": ("aso_get_G0",
+               (s.N, s.N + s.U),
+               (slice(None), slice(None))
+              ),
+        "g_W": ("aso_get_g_weights",
+                (s.Nr, s.n_neurons_g),
+                (slice(None), slice(None))
+               ),
+
+        "H0": ("aso_get_H0",
+               (s.M, s.Nr),
+               (slice(None), slice(None))
+              ),
+        "h_W": ("aso_get_h_weights",
+                (s.M, s.n_neurons_h),
+                (slice(None), slice(None))
+               ),
     }
+
+    neuron_type = _canonical_neuron_type(s.neuron_type)
+    if neuron_type in {"relu", "lif",}:
+        param_arrs = {
+            "g_gain": ("aso_get_g_params",
+                    (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(0, 1))
+                   ),
+            "g_bias": ("aso_get_g_params",
+                    (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(1, 2))
+                   ),
+            "g_E": ("aso_get_g_params",
+                    (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(2, None))
+                   ),
+            "h_gain": ("aso_get_h_params",
+                    (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(0, 1))
+                   ),
+            "h_bias": ("aso_get_h_params",
+                    (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(1, 2))
+                   ),
+            "h_E": ("aso_get_h_params",
+                    (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(2, None))
+                   ),
+        }
+    elif neuron_type in {"rbf",}:
+        param_arrs = {
+            "g_mu": ("aso_get_g_params",
+                    (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(0, s.N))
+                   ),
+            "g_sigma_sq": ("aso_get_g_params",
+                    (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(s.N, s.N + 1))
+                   ),
+            "h_mu": ("aso_get_h_params",
+                    (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(0, s.Nr))
+                   ),
+            "h_sigma_sq": ("aso_get_h_params",
+                    (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(s.Nr, s.Nr + 1))
+                   ),
+        }
+    else:
+        assert False
+
+    return {**base_arrs, **param_arrs}
 
 
 class AdaptiveStateObserverSharedLibrary(cmodule.SharedLibrary):
@@ -197,10 +282,11 @@ class AdaptiveStateObserverSharedLibrary(cmodule.SharedLibrary):
 
         # Array getters
         arrs = _get_array_names_and_shapes(Setup())
-        for arr_name in arrs.keys():
-            fn = getattr(self, "aso_get_{}".format(arr_name))
+        for fn_name in sorted({x[0] for x in arrs.values()}):
+            fn = getattr(self, fn_name)
             fn.argtypes = [c_void_p]
             fn.restype = c_double_p
+
 
 
 ###############################################################################
@@ -233,8 +319,9 @@ def _make_adaptive_state_observer_class(setup, soname):
                      eta=1e-2,
                      eta_rel_g=0.1,
                      eta_rel_h=1.0):
-            # Fetch a list of available arrays and their shapes
-            self._arrs = _get_array_names_and_shapes(setup)
+            # Initialize the numpy array map; otherwise calls to __getattr__
+            # will cause an infinite recursion
+            self._np_arrs = {}
 
             # Copy the setup
             self.setup = setup
@@ -249,6 +336,18 @@ def _make_adaptive_state_observer_class(setup, soname):
             # Create the observer instance
             self._p_observer = lib.aso_create(rng.randint(1 << 31))
             assert not self._p_observer is None
+
+            # Fetch a list of available arrays and their shapes; create the
+            # corresponding numpy array views
+            _arrs = _get_array_names_and_shapes(setup)
+            for arr_name, (fn_name, arr_shape, arr_slices) in _arrs.items():
+                if np.prod(arr_shape) > 0:
+                    fn = getattr(lib, fn_name)
+                    arr = numpy.ctypeslib.as_array(fn(self._p_observer),
+                                                    shape=arr_shape)
+                else:
+                    arr = np.zeros(arr_shape)
+                self._np_arrs[arr_name] = arr.__getitem__(arr_slices)
 
         def __del__(self):
             # Destroy the observer; the library may already have been closed at
@@ -379,19 +478,15 @@ def _make_adaptive_state_observer_class(setup, soname):
 
         def __getattr__(self, name):
             # Make sure the attribute with the given name exists
-            if not name in self._arrs:
+            if not name in self._np_arrs:
                 raise AttributeError(
                     "'{}' object has no attribute '{}'".format(
                         self.__class__.__name__, name))
 
-            # Fetch the function returning a pointer at the corresponding
-            # array. Create a numpy array backed by that pointer.
-            fn = getattr(lib, "aso_get_{}".format(name))
-            return numpy.ctypeslib.as_array(fn(self._p_observer),
-                                            shape=self._arrs[name])
+            return self._np_arrs[name]
 
         def __setattr__(self, name, value):
-            if ("_arrs" in self.__dict__) and (name in self._arrs):
+            if ("_np_arrs" in self.__dict__) and (name in self._np_arrs):
                 raise AttributeError(
                     "Attribute '{}' of '{}' object is read-only".format(
                         name, self.__class__.__name__))
@@ -443,6 +538,7 @@ if __name__ == "__main__":
         n_state_dim=2,
         n_aux_state_dim=1,
         n_neurons_g=110,
+        neuron_type="rbf",
     )
     AdaptiveStateObserver = compile(setup=setup, debug=False)
 
@@ -450,7 +546,7 @@ if __name__ == "__main__":
     observer.H0[...] = np.zeros((1, 1))
     observer.G0[...] = np.array(((-1.0, 6.0), (-6.0, -1.0)))
 
-    T = 10000.0
+    T = 100.0
     ts = np.arange(0, T, observer.dt)
     zs = np.sin(2.0 * np.pi * ts)
 
@@ -463,12 +559,14 @@ if __name__ == "__main__":
     print("Execution took {:0.4f}ms".format((t1 - t0) * 1000.0))
 
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    ax.plot(ts, zs)
     if zs_pred is None:
         zs_pred = observer.pred_z(xs)
-    else:
-        ax.plot(ts, zs_pred)
+    fig, ax = plt.subplots()
+    ax.plot(ts, zs)
+    ax.set_prop_cycle(None)
+    ax.plot(ts, zs_pred, '--')
+    ax.set_xlabel("Time $t$")
+    ax.set_ylabel("Observation $\\vec z$")
 
     if not xs is None:
         fig, ax = plt.subplots()

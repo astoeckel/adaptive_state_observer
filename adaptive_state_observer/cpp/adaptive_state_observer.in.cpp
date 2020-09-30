@@ -126,7 +126,11 @@ double *aso_get_G0(Observer *o) { return o->G0(); }
 
 double *aso_get_H0(Observer *o) { return o->H0(); }
 
-double *aso_get_ens_g_params(Observer *o) { return o->ens_g_params(); }
+double *aso_get_g_weights(Observer *o) { return o->ens_g().weights().data(); }
 
-double *aso_get_ens_h_params(Observer *o) { return o->ens_h_params(); }
+double *aso_get_h_weights(Observer *o) { return o->ens_h().weights().data(); }
+
+double *aso_get_g_params(Observer *o) { return o->ens_g().params().data(); }
+
+double *aso_get_h_params(Observer *o) { return o->ens_h().params().data(); }
 }

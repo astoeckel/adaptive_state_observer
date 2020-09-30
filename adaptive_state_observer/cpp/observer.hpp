@@ -29,7 +29,7 @@
 
 template <size_t N_STATE_DIM, size_t N_AUX_STATE_DIM, size_t N_OBSERVATION_DIM,
           size_t N_CONTROL_DIM, size_t N_NEURONS_G, size_t N_NEURONS_H,
-          typename NEURON_TYPE = ReLU>
+          template<size_t, size_t, size_t> class ENSEMBLE_TYPE = ReLUEnsemble>
 class AdaptiveStateObserver {
 public:
 	/**
@@ -65,8 +65,8 @@ public:
 	using ObservationMatrix = Mat<M, Nr>;
 
 	/* Neuron ensemble types */
-	using EnsembleG = NEFEnsemble<NEURON_TYPE, N_NEURONS_G, N + U, Nr>;
-	using EnsembleH = NEFEnsemble<NEURON_TYPE, N_NEURONS_H, Nr, M>;
+	using EnsembleG = ENSEMBLE_TYPE<N_NEURONS_G, N + U, Nr>;
+	using EnsembleH = ENSEMBLE_TYPE<N_NEURONS_H, Nr, M>;
 
 	/* Neuron ensemble specific vector types */
 	using NeuronVecG = typename EnsembleG::NeuronVec;
@@ -161,7 +161,7 @@ public:
 
 		// Compute the observation error, and derive the state update error
 		Observation pred_z = m_H0 * xr + m_ens_h.forward(a_h);
-		const ObservationMatrix H_ = m_H0 + m_ens_h.jacobian(J_h, a_h);
+		const ObservationMatrix H_ = m_H0 + m_ens_h.jacobian(J_h, a_h, xr);
 		const Observation err_z = z - pred_z;
 		const ReducedState err_dxr = p.gain * (H_.transpose() * err_z);
 
@@ -172,8 +172,8 @@ public:
 		pred_dxr += m_ens_g.forward(a_g);
 
 		// Update the learned functions according to the computed errors
-		m_ens_g.backward(p.dt * p.eta * p.eta_rel_g, err_dxr, a_g);
-		m_ens_h.backward(p.dt * p.eta * p.eta_rel_h, err_z, a_h);
+		m_ens_g.backward(a_g, err_dxr, p.dt * p.eta * p.eta_rel_g);
+		m_ens_h.backward(a_h, err_z, p.dt * p.eta * p.eta_rel_h);
 
 		// Compute the complete state update by summing the predicted state
 		// update and the state update error.
@@ -189,7 +189,7 @@ public:
 	double *G0() { return m_G0.data(); }
 	double *H0() { return m_H0.data(); }
 
-	double *ens_g_params() { return m_ens_g.params().data(); }
-	double *ens_h_params() { return m_ens_h.params().data(); }
+	EnsembleG& ens_g() { return m_ens_g; }
+	EnsembleH& ens_h() { return m_ens_h; }
 };
 

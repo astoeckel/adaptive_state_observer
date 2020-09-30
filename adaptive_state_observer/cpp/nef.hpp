@@ -18,10 +18,10 @@
 
 #pragma once
 
+#include <Eigen/Dense>
 #include <cstddef>
 #include <random>
-
-#include <Eigen/Dense>
+#include <iostream>
 
 #include "dists.hpp"
 #include "matrix.hpp"
@@ -82,42 +82,26 @@ public:
 	static constexpr size_t n_dim_out = N_DIM_OUT;
 	static constexpr size_t n_params = N_DIM_IN + 2;
 
-	using Parameters = Mat<Eigen::Dynamic, Eigen::Dynamic>;
-	using NeuronVec = Arr<N_NEURONS>;
-	using Input = Vec<N_DIM_IN>;
-	using Output = Vec<N_DIM_OUT>;
-	using Weights = Mat<Eigen::Dynamic, Eigen::Dynamic>;
-	using Jacobian = Mat<N_DIM_OUT, N_DIM_IN>;
-
-	using Gain = Eigen::Map<Arr<N_NEURONS>, 0, Eigen::Stride<n_params, 1>>;
-	using Bias = Eigen::Map<Arr<N_NEURONS>, 0, Eigen::Stride<n_params, 1>>;
-	using Encoder =
-	    Eigen::Map<Mat<N_NEURONS, N_DIM_IN>, 0, Eigen::Stride<n_params, 1>>;
+	using Parameters = Mat<n_neurons, n_params>;
+	using NeuronVec = Arr<n_neurons>;
+	using Input = Vec<n_dim_in>;
+	using Output = Vec<n_dim_out>;
+	using Weights = Mat<n_dim_out, n_neurons>;
+	using Jacobian = Mat<n_dim_out, n_dim_in>;
+	using Encoder = Mat<n_neurons, n_dim_in>;
 
 private:
-	/**
-	 * Matrix containing parameters including the encoders, gains, and biases.
-	 */
 	Parameters m_params;
-
-	/**
-	 * Matrix containing the decoder weights.
-	 */
 	Weights m_weights;
 
-	/**
-	 * Gain array. This is pointing
-	 */
-	Gain m_gain;
-
-	Bias m_bias;
-
-	Encoder m_encoder;
+	Eigen::Map<NeuronVec, Eigen::Aligned16, Stride<NeuronVec, n_params>> m_gain;
+	Eigen::Map<NeuronVec, Eigen::Aligned8, Stride<NeuronVec, n_params>> m_bias;
+	Eigen::Map<Encoder, Eigen::Aligned16, Stride<Encoder, n_params>> m_encoder;
 
 public:
 	NEFEnsemble(std::mt19937 &rng)
-	    : m_params(Parameters::Zero(N_NEURONS, n_params)),
-	      m_weights(Weights::Zero(n_dim_out, N_NEURONS)),
+	    : m_params(Parameters::Zero()),
+	      m_weights(Weights::Zero()),
 	      m_gain(m_params.data() + 0),
 	      m_bias(m_params.data() + 1),
 	      m_encoder(m_params.data() + 2)
@@ -172,12 +156,13 @@ public:
 
 	Output forward(const NeuronVec &a) const { return m_weights * a.matrix(); }
 
-	void backward(double eta, const Output &err, const NeuronVec &a)
+	void backward(const NeuronVec &a, const Output &err, double eta)
 	{
 		m_weights += (eta * err) * a.matrix().transpose();
 	}
 
-	Jacobian jacobian(const NeuronVec &J, const NeuronVec &a) const
+	Jacobian jacobian(const NeuronVec &J, const NeuronVec &a,
+	                  const Input &) const
 	{
 		Jacobian res;
 
@@ -207,4 +192,105 @@ public:
 
 	Parameters &params() { return m_params; }
 	const Parameters &params() const { return m_params; }
+
+	Weights &weights() { return m_weights; }
+	const Weights &weights() const { return m_weights; }
 };
+
+template <size_t N_NEURONS, size_t N_DIM_IN, size_t N_DIM_OUT>
+using ReLUEnsemble = NEFEnsemble<ReLU, N_NEURONS, N_DIM_IN, N_DIM_OUT>;
+
+template <size_t N_NEURONS, size_t N_DIM_IN, size_t N_DIM_OUT>
+using LIFEnsemble = NEFEnsemble<LIF<>, N_NEURONS, N_DIM_IN, N_DIM_OUT>;
+
+template <size_t N_NEURONS, size_t N_DIM_IN, size_t N_DIM_OUT>
+class RBFEnsemble {
+public:
+	static constexpr size_t n_neurons = N_NEURONS;
+	static constexpr size_t n_dim_in = N_DIM_IN;
+	static constexpr size_t n_dim_out = N_DIM_OUT;
+	static constexpr size_t n_params = N_DIM_IN + 1;
+
+	using Parameters = Mat<n_neurons, n_params>;
+	using NeuronVec = Arr<n_neurons>;
+	using Input = Vec<n_dim_in>;
+	using Output = Vec<n_dim_out>;
+	using Weights = Mat<n_dim_out, n_neurons>;
+	using Jacobian = Mat<n_dim_out, n_dim_in>;
+	using Centroids = Mat<n_neurons, n_dim_in>;
+
+private:
+	Parameters m_params;
+	Weights m_weights;
+
+	Eigen::Map<NeuronVec, Eigen::Aligned8, Stride<NeuronVec, n_params>>
+	    m_sigma_sq;
+	Eigen::Map<Centroids, Eigen::Aligned16, Stride<Centroids, n_params>> m_mu;
+
+public:
+	RBFEnsemble(std::mt19937 &rng)
+	    : m_params(Parameters::Zero()),
+	      m_weights(Weights::Zero()),
+	      m_sigma_sq(m_params.data() + n_dim_in),
+	      m_mu(m_params.data() + 0)
+	{
+		m_sigma_sq = Eigen::pow(
+		    10.0, 2.0 * Dists::uniform(-1.0, 0.0, n_neurons, 1, rng).array());
+		m_mu = Dists::uniform(-1.0, 1.0, n_neurons, n_dim_in, rng);
+	}
+
+	/**
+	 * Computes the input current flowing into each non-linearity.
+	 */
+	NeuronVec activations(const Input &x) const
+	{
+		NeuronVec res;
+		for (size_t i = 0; i < n_neurons; i++) {
+			res[i] = -(m_mu.row(i) - x.transpose()).squaredNorm() / m_sigma_sq[i];
+		}
+		return res;
+	}
+
+	/**
+	 * Computes the input current flowing into each non-linearity.
+	 */
+	NeuronVec activities(const NeuronVec &a) const { return a.exp(); }
+
+	Output forward(const NeuronVec &a) const { return m_weights * a.matrix(); }
+
+	void backward(const NeuronVec &a, const Output &err, double eta)
+	{
+		m_weights += (eta * err) * a.matrix().transpose();
+	}
+
+	Jacobian jacobian(const NeuronVec &, const NeuronVec &a,
+	                  const Input &x) const
+	{
+		Jacobian res;
+
+		// Evaluate the derivative of the activities given the context
+		const NeuronVec da = 2.0 * a / m_sigma_sq;
+
+		// Compute each column of the target matrix individually. This way we
+		// don't have to allocate a large intermediate matrix on the heap
+		for (size_t i = 0; i < n_dim_in; i++) {
+			// Multiply the derivative of the activities by the corresponding
+			// column of the encoder.
+			const NeuronVec tmp = da * (m_mu.col(i).array() - x[i]);
+
+			// Compute the matrix-vector product between the temporary scaled
+			// column of the encoding matrix and multiply it by the decoding
+			// weights
+			res.col(i).noalias() = m_weights * tmp.matrix();
+		}
+
+		return res;
+	}
+
+	Parameters &params() { return m_params; }
+	const Parameters &params() const { return m_params; }
+
+	Weights &weights() { return m_weights; }
+	const Weights &weights() const { return m_weights; }
+};
+
