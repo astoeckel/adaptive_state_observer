@@ -236,7 +236,7 @@ public:
 	{
 		m_sigma_sq = Eigen::pow(
 		    10.0, 2.0 * Dists::uniform(-1.0, 0.0, n_neurons, 1, rng).array());
-		m_mu = Dists::uniform(-1.0, 1.0, n_neurons, n_dim_in, rng);
+		m_mu = Dists::halton(n_neurons, n_dim_in).array() * 2.0 - 1.0;
 	}
 
 	/**
