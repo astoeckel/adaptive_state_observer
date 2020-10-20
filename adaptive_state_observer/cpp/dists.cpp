@@ -20,7 +20,7 @@
 
 namespace Dists {
 Eigen::MatrixXd uniform(double min, double max, size_t n_smpls, size_t n_dims,
-                 std::mt19937 &rng)
+                        std::mt19937 &rng)
 {
 	std::uniform_real_distribution<double> dist(min, max);
 	Eigen::MatrixXd res(n_smpls, n_dims);

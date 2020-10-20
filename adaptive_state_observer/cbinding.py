@@ -15,7 +15,7 @@
 #
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""H
+"""
 Contains the Python binding to the adaptive state observer C++ code. In
 particular, the code in this file generates the final version of the C++ code
 depending on the given parameters and compiles it.
@@ -109,9 +109,14 @@ class Setup:
     @property
     def n_params_g(self):
         neuron_type = _canonical_neuron_type(self.neuron_type)
-        if neuron_type in {"relu", "lif",}:
+        if neuron_type in {
+                "relu",
+                "lif",
+        }:
             return self.N + 2
-        elif neuron_type in {"rbf",}:
+        elif neuron_type in {
+                "rbf",
+        }:
             return self.N + 1
         else:
             assert False
@@ -119,9 +124,14 @@ class Setup:
     @property
     def n_params_h(self):
         neuron_type = _canonical_neuron_type(self.neuron_type)
-        if neuron_type in {"relu", "lif",}:
+        if neuron_type in {
+                "relu",
+                "lif",
+        }:
             return self.Nr + 2
-        elif neuron_type in {"rbf",}:
+        elif neuron_type in {
+                "rbf",
+        }:
             return self.Nr + 1
         else:
             assert False
@@ -178,71 +188,46 @@ c_params_p = POINTER(Params)
 
 def _get_array_names_and_shapes(s):
     base_arrs = {
-        "G0": ("aso_get_G0",
-               (s.N, s.N + s.U),
-               (slice(None), slice(None))
-              ),
-        "g_W": ("aso_get_g_weights",
-                (s.Nr, s.n_neurons_g),
-                (slice(None), slice(None))
-               ),
-
-        "H0": ("aso_get_H0",
-               (s.M, s.Nr),
-               (slice(None), slice(None))
-              ),
-        "h_W": ("aso_get_h_weights",
-                (s.M, s.n_neurons_h),
-                (slice(None), slice(None))
-               ),
+        "G0": ("aso_get_G0", (s.N, s.N + s.U), (slice(None), slice(None))),
+        "g_W": ("aso_get_g_weights", (s.Nr, s.n_neurons_g), (slice(None),
+                                                             slice(None))),
+        "H0": ("aso_get_H0", (s.M, s.Nr), (slice(None), slice(None))),
+        "h_W": ("aso_get_h_weights", (s.M, s.n_neurons_h), (slice(None),
+                                                            slice(None))),
     }
 
     neuron_type = _canonical_neuron_type(s.neuron_type)
-    if neuron_type in {"relu", "lif",}:
+    if neuron_type in {
+            "relu",
+            "lif",
+    }:
         param_arrs = {
-            "g_gain": ("aso_get_g_params",
-                    (s.n_neurons_g, s.n_params_g),
-                    (slice(None), slice(0, 1))
-                   ),
-            "g_bias": ("aso_get_g_params",
-                    (s.n_neurons_g, s.n_params_g),
-                    (slice(None), slice(1, 2))
-                   ),
-            "g_E": ("aso_get_g_params",
-                    (s.n_neurons_g, s.n_params_g),
-                    (slice(None), slice(2, None))
-                   ),
-            "h_gain": ("aso_get_h_params",
-                    (s.n_neurons_h, s.n_params_h),
-                    (slice(None), slice(0, 1))
-                   ),
-            "h_bias": ("aso_get_h_params",
-                    (s.n_neurons_h, s.n_params_h),
-                    (slice(None), slice(1, 2))
-                   ),
-            "h_E": ("aso_get_h_params",
-                    (s.n_neurons_h, s.n_params_h),
-                    (slice(None), slice(2, None))
-                   ),
+            "g_gain": ("aso_get_g_params", (s.n_neurons_g, s.n_params_g),
+                       (slice(None), slice(0, 1))),
+            "g_bias": ("aso_get_g_params", (s.n_neurons_g, s.n_params_g),
+                       (slice(None), slice(1, 2))),
+            "g_E": ("aso_get_g_params", (s.n_neurons_g, s.n_params_g),
+                    (slice(None), slice(2, None))),
+            "h_gain": ("aso_get_h_params", (s.n_neurons_h, s.n_params_h),
+                       (slice(None), slice(0, 1))),
+            "h_bias":
+            ("aso_get_h_params", (s.n_neurons_h, s.n_params_h), (slice(None),
+                                                                 slice(1, 2))),
+            "h_E": ("aso_get_h_params", (s.n_neurons_h, s.n_params_h),
+                    (slice(None), slice(2, None))),
         }
-    elif neuron_type in {"rbf",}:
+    elif neuron_type in {
+            "rbf",
+    }:
         param_arrs = {
-            "g_mu": ("aso_get_g_params",
-                    (s.n_neurons_g, s.n_params_g),
-                    (slice(None), slice(0, s.N))
-                   ),
-            "g_sigma_sq": ("aso_get_g_params",
-                    (s.n_neurons_g, s.n_params_g),
-                    (slice(None), slice(s.N, s.N + 1))
-                   ),
-            "h_mu": ("aso_get_h_params",
-                    (s.n_neurons_h, s.n_params_h),
-                    (slice(None), slice(0, s.Nr))
-                   ),
-            "h_sigma_sq": ("aso_get_h_params",
-                    (s.n_neurons_h, s.n_params_h),
-                    (slice(None), slice(s.Nr, s.Nr + 1))
-                   ),
+            "g_mu": ("aso_get_g_params", (s.n_neurons_g, s.n_params_g),
+                     (slice(None), slice(0, s.N))),
+            "g_sigma_sq": ("aso_get_g_params", (s.n_neurons_g, s.n_params_g),
+                           (slice(None), slice(s.N, s.N + 1))),
+            "h_mu": ("aso_get_h_params", (s.n_neurons_h, s.n_params_h),
+                     (slice(None), slice(0, s.Nr))),
+            "h_sigma_sq": ("aso_get_h_params", (s.n_neurons_h, s.n_params_h),
+                           (slice(None), slice(s.Nr, s.Nr + 1))),
         }
     else:
         assert False
@@ -552,9 +537,7 @@ if __name__ == "__main__":
 
     import time
     t0 = time.perf_counter()
-
     xs, zs_pred = observer.step(zs, return_zs=True, return_xs=True)
-
     t1 = time.perf_counter()
     print("Execution took {:0.4f}ms".format((t1 - t0) * 1000.0))
 

@@ -29,7 +29,7 @@
 
 template <size_t N_STATE_DIM, size_t N_AUX_STATE_DIM, size_t N_OBSERVATION_DIM,
           size_t N_CONTROL_DIM, size_t N_NEURONS_G, size_t N_NEURONS_H,
-          template<size_t, size_t, size_t> class ENSEMBLE_TYPE = ReLUEnsemble>
+          template <size_t, size_t, size_t> class ENSEMBLE_TYPE = ReLUEnsemble>
 class AdaptiveStateObserver {
 public:
 	/**
@@ -189,7 +189,7 @@ public:
 	double *G0() { return m_G0.data(); }
 	double *H0() { return m_H0.data(); }
 
-	EnsembleG& ens_g() { return m_ens_g; }
-	EnsembleH& ens_h() { return m_ens_h; }
+	EnsembleG &ens_g() { return m_ens_g; }
+	EnsembleH &ens_h() { return m_ens_h; }
 };
 

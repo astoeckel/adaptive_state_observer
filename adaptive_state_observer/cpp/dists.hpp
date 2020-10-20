@@ -25,7 +25,8 @@
 
 namespace Dists {
 Eigen::MatrixXd uniform(double min, double max, size_t n_smpls, size_t n_dims,
-                 std::mt19937 &rng);
+                        std::mt19937 &rng);
+
 Eigen::MatrixXd hypersphere(size_t n_smpls, size_t n_dims, std::mt19937 &rng);
 }  // namespace Dists
 
