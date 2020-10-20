@@ -44,6 +44,10 @@ Observer *aso_create(uint32_t seed)
 	return new Observer(rng);
 }
 
+Observer *aso_clone(const Observer *observer) {
+	return new Observer(*observer);
+}
+
 void aso_free(Observer *observer) { delete observer; }
 
 void aso_step_single(Observer *observer, const double *x, const double *u,

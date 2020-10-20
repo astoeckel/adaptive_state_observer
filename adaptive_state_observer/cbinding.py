@@ -244,6 +244,10 @@ class AdaptiveStateObserverSharedLibrary(cmodule.SharedLibrary):
         self.aso_create.argtypes = [c_uint32]
         self.aso_create.restype = c_void_p
 
+        # Clone operation
+        self.aso_clone.argtypes = [c_void_p]
+        self.aso_clone.restype = c_void_p
+
         # Instance destructor
         self.aso_free.argtypes = [c_void_p]
         self.aso_free.restype = None
@@ -271,7 +275,6 @@ class AdaptiveStateObserverSharedLibrary(cmodule.SharedLibrary):
             fn = getattr(self, fn_name)
             fn.argtypes = [c_void_p]
             fn.restype = c_double_p
-
 
 
 ###############################################################################
@@ -309,7 +312,7 @@ def _make_adaptive_state_observer_class(setup, soname):
             self._np_arrs = {}
 
             # Copy the setup
-            self.setup = setup
+            self.setup = Setup(*dataclasses.astuple(setup))
 
             # Copy the given parameters
             self.dt = dt
@@ -322,14 +325,19 @@ def _make_adaptive_state_observer_class(setup, soname):
             self._p_observer = lib.aso_create(rng.randint(1 << 31))
             assert not self._p_observer is None
 
+            # Read all numpy array references
+            self.init_arrays()
+
+        def init_arrays(self):
             # Fetch a list of available arrays and their shapes; create the
             # corresponding numpy array views
+            self._np_arrs = {}
             _arrs = _get_array_names_and_shapes(setup)
             for arr_name, (fn_name, arr_shape, arr_slices) in _arrs.items():
                 if np.prod(arr_shape) > 0:
                     fn = getattr(lib, fn_name)
-                    arr = numpy.ctypeslib.as_array(fn(self._p_observer),
-                                                    shape=arr_shape)
+                    mem = fn(self._p_observer)
+                    arr = numpy.ctypeslib.as_array(mem, shape=arr_shape)
                 else:
                     arr = np.zeros(arr_shape)
                 self._np_arrs[arr_name] = arr.__getitem__(arr_slices)
@@ -340,6 +348,29 @@ def _make_adaptive_state_observer_class(setup, soname):
             if (not self._p_observer is None) and lib.is_open:
                 lib.aso_free(self._p_observer)
             self._p_observer = None
+
+        def __copy__(self):
+            # Create a new instance of this class without calling __init__
+            cls = self.__class__
+            res = cls.__new__(cls)
+
+            # Copy all primitive data types
+            res.__dict__.update(self.__dict__)
+
+            # Copy the setup
+            res.setup = Setup(*dataclasses.astuple(self.setup))
+
+            # Clone the C++ instance
+            res._p_observer = lib.aso_clone(self._p_observer)
+            assert not res._p_observer is None
+
+            # Initialize the array references given the new C++ instance
+            res.init_arrays()
+
+            return res
+
+        def __deepcopy__(self, memo):
+            return self.__copy__()
 
         def step(self, zs, us=None, x0=None, return_xs=True, return_zs=True):
             # Make sure the input arrays are arrays
@@ -554,11 +585,13 @@ if __name__ == "__main__":
     ax.plot(ts, zs_pred, '--')
     ax.set_xlabel("Time $t$")
     ax.set_ylabel("Observation $\\vec z$")
+    ax.set_title("Observation")
 
     if not xs is None:
         fig, ax = plt.subplots()
         ax.plot(ts, xs)
         ax.set_xlabel("Time $t$")
         ax.set_ylabel("State $\\vec x$")
+    ax.set_title("Filter state")
     plt.show()
 
