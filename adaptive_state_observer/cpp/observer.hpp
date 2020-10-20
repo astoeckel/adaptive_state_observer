@@ -145,7 +145,8 @@ public:
 	 * compute a new state x'. Updates the learned functions.
 	 */
 	std::tuple<State, Observation> step(const State &x, const Control &u,
-	                                    const Observation &z, const Params &p)
+	                                    const Observation &z, const Params &p,
+	                                    bool autonomous = false)
 	{
 		// Build several variants of the state vector
 		const StateAndControl xu = concatenate_state_and_control(x, u);
@@ -159,10 +160,16 @@ public:
 		const NeuronVecG a_g = m_ens_g.activities(J_g);
 		const NeuronVecH a_h = m_ens_h.activities(J_h);
 
-		// Compute the observation error, and derive the state update error
+		// Compute the observation error, and derive the state update error.
+		// In case no observation was given, just assume that the observation
+		// error is zero. This puts the observer into an "autonomous" mode,
+		// where it is solely producing a state update.
 		Observation pred_z = m_H0 * xr + m_ens_h.forward(a_h);
 		const ObservationMatrix H_ = m_H0 + m_ens_h.jacobian(J_h, a_h, xr);
-		const Observation err_z = z - pred_z;
+		Observation err_z = Observation::Zero();
+		if (!autonomous) {
+			err_z.noalias() = z - pred_z;
+		}
 		const ReducedState err_dxr = p.gain * (H_.transpose() * err_z);
 
 		// Compute the predicted state update; provide a view on the first

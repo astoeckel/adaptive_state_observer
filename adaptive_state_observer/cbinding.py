@@ -251,7 +251,7 @@ class AdaptiveStateObserverSharedLibrary(cmodule.SharedLibrary):
         # Step function
         self.aso_step.argtypes = [
             c_void_p, c_double_p, c_double_p, c_double_p, c_params_p,
-            c_double_p, c_double_p, c_uint32
+            c_double_p, c_double_p, c_uint32, c_uint32
         ]
         self.aso_step.restype = None
 
@@ -349,23 +349,27 @@ def _make_adaptive_state_observer_class(setup, soname):
 
             # Initialize x0 to zero if no explicit value is given
             if x0 is None:
-                x0 = np.zeros((setup.N,))
+                x0 = np.zeros((setup.N, ))
 
-            # The first dimension of us and zs should be the number of samples
+            # The first dimension of us and zs should be the number of samples.
+            # However, the number of samples for zs can be smaller than the
+            # number of samples for us, in which case the observer will run
+            # autonomously.
             if zs.ndim < 2:
                 zs = zs.reshape((-1, setup.M))
-            n_samples = zs.shape[0]
+            n_smpls_zs = zs.shape[0]
             if us is None:
                 assert setup.U == 0
-                us = np.zeros((n_samples, 0))
+                us = np.zeros((n_smpls_zs, 0))
             elif us.ndim < 2:
                 us = us.reshape((-1, setup.U))
-            assert us.shape[0] == zs.shape[0] == n_samples
+            n_smpls_us = us.shape[0]
+            assert n_smpls_us >= n_smpls_zs
 
             # Make sure the other dimensions are correct
             assert x0.size == setup.N
-            assert zs.size == setup.M * n_samples
-            assert us.size == setup.U * n_samples
+            assert zs.size == setup.M * n_smpls_zs
+            assert us.size == setup.U * n_smpls_us
 
             # Fetch pointers at the input arrays
             x0 = x0.astype(dtype=np.float64, order='C', copy=False)
@@ -377,9 +381,9 @@ def _make_adaptive_state_observer_class(setup, soname):
 
             # Create the output arrays
             xs_tar, p_xs_tar = _create_output_array(return_xs,
-                                                    (n_samples, setup.N))
+                                                    (n_smpls_us, setup.N))
             zs_tar, p_zs_tar = _create_output_array(return_zs,
-                                                    (n_samples, setup.M))
+                                                    (n_smpls_us, setup.M))
 
             # Assemble the parameter struct
             params = Params(dt=self.dt,
@@ -392,7 +396,7 @@ def _make_adaptive_state_observer_class(setup, soname):
             # Call the step function
             p_obs = self._p_observer
             lib.aso_step(p_obs, p_x0, p_us, p_zs, p_params, p_xs_tar, p_zs_tar,
-                         n_samples)
+                         n_smpls_zs, n_smpls_us)
 
             # Return the array containing the result
             return xs_tar, zs_tar

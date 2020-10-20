@@ -47,7 +47,8 @@ Observer *aso_create(uint32_t seed)
 void aso_free(Observer *observer) { delete observer; }
 
 void aso_step_single(Observer *observer, const double *x, const double *u,
-                     const double *z, const Params *p, double *x_out, double *z_out)
+                     const double *z, const Params *p, double *x_out,
+                     double *z_out, bool autonomous)
 {
 	Eigen::Map<const Observer::State> map_x(x);
 	Eigen::Map<const Observer::Control> map_u(u);
@@ -55,7 +56,8 @@ void aso_step_single(Observer *observer, const double *x, const double *u,
 	Eigen::Map<Observer::State> map_x_out(x_out);
 	Eigen::Map<Observer::Observation> map_z_out(z_out);
 
-	std::tie(map_x_out, map_z_out) = observer->step(map_x, map_u, map_z, *p);
+	std::tie(map_x_out, map_z_out) =
+	    observer->step(map_x, map_u, map_z, *p, autonomous);
 }
 
 void aso_pred_dx_single(Observer *observer, const double *x, const double *u,
@@ -78,31 +80,32 @@ void aso_pred_z_single(Observer *observer, const double *x, double *z)
 
 void aso_step(Observer *observer, const double *x0, const double *u,
               const double *z, const Params *p, double *x_out, double *z_out,
-              uint32_t n)
+              uint32_t n_z, uint32_t n_u)
 {
 	// Write to some temporary pointers on the stack in case no target pointer
 	// was given
-	Observer::State x_tmp;
-	Observer::Observation z_tmp;
+	Observer::State x_tmp = Observer::State::Zero();
+	Observer::Observation z_tmp = Observer::Observation::Zero();
 	const size_t x_out_stride = x_out ? $N_STATE_DIM : 0;
 	const size_t z_out_stride = z_out ? $N_OBSERVATION_DIM : 0;
 	x_out = x_out ? x_out : x_tmp.data();
 	z_out = z_out ? z_out : z_tmp.data();
 
-	for (uint32_t i = 0; i < n; i++) {
+	for (uint32_t i = 0; i < n_u; i++) {
 		// Use "x0" for the first iteration; the last state for later iterations
 		const double *x_in = (i == 0) ? x0 : (x_out + (x_out_stride * (i - 1)));
 
 		// Compute the other input pointers
 		const double *u_in = u + $N_CONTROL_DIM * i;
-		const double *z_in = z + $N_OBSERVATION_DIM * i;
+		const double *z_in =
+		    (i < n_z) ? (z + $N_OBSERVATION_DIM * i) : z_tmp.data();
 
 		// Compute the target pointers
 		double *x_tar = x_out + (x_out_stride * i);
 		double *z_tar = z_out + (z_out_stride * i);
 
 		// Perform a single step
-		aso_step_single(observer, x_in, u_in, z_in, p, x_tar, z_tar);
+		aso_step_single(observer, x_in, u_in, z_in, p, x_tar, z_tar, i >= n_z);
 	}
 }
 
@@ -118,7 +121,8 @@ void aso_pred_dx(Observer *observer, const double *x, const double *u,
 void aso_pred_z(Observer *observer, const double *x, double *z, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++) {
-		aso_pred_z_single(observer, x + $N_STATE_DIM * i, z + $N_OBSERVATION_DIM * i);
+		aso_pred_z_single(observer, x + $N_STATE_DIM * i,
+		                  z + $N_OBSERVATION_DIM * i);
 	}
 }
 
